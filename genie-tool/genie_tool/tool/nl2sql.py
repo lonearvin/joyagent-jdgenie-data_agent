@@ -206,6 +206,8 @@ class NL2SQLAgent:
                             tmp_dict["query"] = query_info_list[0]
                             nl2sql = query_info_list[1]
                             nl2sql = nl2sql.replace(";", "")
+                            # 使用LLM修复SQL语法错误
+                            nl2sql = await self._fix_sql_with_llm(nl2sql, rewritten_query, model, temperature, top_p)
                             tmp_dict["nl2sql"] = nl2sql
                         if len(tmp_dict) > 0:
                             llm_post_result.append(tmp_dict)
@@ -231,6 +233,43 @@ class NL2SQLAgent:
         logger.info(f"[NL2SQL] request_id={request_id} response={json.dumps(response, ensure_ascii=False)}")
         return response
     
+    async def _fix_sql_with_llm(self, sql: str, query: str, model: str, temperature: float, top_p: float) -> str:
+        """
+        使用LLM来修复SQL语法错误
+        """
+        fix_prompt = f"""请修复以下SQL语句的语法错误，只返回修复后的SQL，不要添加其他内容。
+
+原查询问题：{query}
+有语法错误的SQL：
+{sql}
+
+请只输出修复后的SQL，不要添加任何解释。"""
+        
+        logger.info(f"[NL2SQL] 尝试使用LLM修复SQL: {sql}")
+        
+        fixed_sql = ""
+        async for chunk in ask_llm(
+                                messages=[{"role": "user", "content": fix_prompt}],
+                                model=model,
+                                stream=False,
+                                temperature=temperature,
+                                top_p=top_p,
+                                only_content=True
+                            ):
+            fixed_sql = chunk
+        
+        # 清理输出，只保留SQL部分
+        fixed_sql = fixed_sql.strip()
+        # 移除可能的markdown代码块标记
+        if fixed_sql.startswith("```"):
+            lines = fixed_sql.split("\n")
+            if len(lines) > 1:
+                fixed_sql = "\n".join(lines[1:-1])
+        fixed_sql = fixed_sql.replace(";", "").strip()
+        
+        logger.info(f"[NL2SQL] LLM修复后的SQL: {fixed_sql}")
+        return fixed_sql
+
     async def m_schema_format(self, rank_result: List):
         m_schema_info = []
         # 并行处理表结构转换
