@@ -28,6 +28,36 @@ class NL2SQLAgent:
         self.default_model: str = "gpt-4.1"
         self.temperature: float = 0.0
         self.top_p: float = 1.0
+    
+    def _convert_mysql_to_h2(self, sql: str) -> str:
+        """
+        将MySQL语法转换为H2语法
+        """
+        # DATE_SUB(CURDATE(), INTERVAL 5 YEAR) -> DATEADD(YEAR, -5, CURRENT_DATE)
+        import re
+        
+        # 处理 DATE_SUB(CURDATE(), INTERVAL X YEAR)
+        sql = re.sub(r'DATE_SUB\(CURDATE\(\),\s*INTERVAL\s+(\d+)\s+YEAR\)', r'DATEADD(YEAR, -\1, CURRENT_DATE)', sql)
+        sql = re.sub(r'DATE_SUB\(CURDATE\(\),\s*INTERVAL\s+(\d+)\s+MONTH\)', r'DATEADD(MONTH, -\1, CURRENT_DATE)', sql)
+        sql = re.sub(r'DATE_SUB\(CURDATE\(\),\s*INTERVAL\s+(\d+)\s+DAY\)', r'DATEADD(DAY, -\1, CURRENT_DATE)', sql)
+        
+        # 处理 DATE_SUB(date_column, INTERVAL X YEAR)
+        sql = re.sub(r'DATE_SUB\(\s*`?([^`\)]+)`?\s*,\s*INTERVAL\s+(\d+)\s+YEAR\)', r'DATEADD(YEAR, -\2, \1)', sql)
+        sql = re.sub(r'DATE_SUB\(\s*`?([^`\)]+)`?\s*,\s*INTERVAL\s+(\d+)\s+MONTH\)', r'DATEADD(MONTH, -\2, \1)', sql)
+        sql = re.sub(r'DATE_SUB\(\s*`?([^`\)]+)`?\s*,\s*INTERVAL\s+(\d+)\s+DAY\)', r'DATEADD(DAY, -\2, \1)', sql)
+        
+        # 处理 DATE_ADD(CURDATE(), INTERVAL X YEAR)
+        sql = re.sub(r'DATE_ADD\(CURDATE\(\),\s*INTERVAL\s+(\d+)\s+YEAR\)', r'DATEADD(YEAR, \1, CURRENT_DATE)', sql)
+        sql = re.sub(r'DATE_ADD\(CURDATE\(\),\s*INTERVAL\s+(\d+)\s+MONTH\)', r'DATEADD(MONTH, \1, CURRENT_DATE)', sql)
+        sql = re.sub(r'DATE_ADD\(CURDATE\(\),\s*INTERVAL\s+(\d+)\s+DAY\)', r'DATEADD(DAY, \1, CURRENT_DATE)', sql)
+        
+        # 处理 CURDATE() -> CURRENT_DATE
+        sql = sql.replace('CURDATE()', 'CURRENT_DATE')
+        
+        # 处理 DATE_FORMAT -> FORMATDATETIME
+        sql = re.sub(r'DATE_FORMAT\(\s*`?([^`\)]+)`?\s*,\s*\'([^\']+)\'\s*\)', r"FORMATDATETIME(\1, '\2')", sql)
+        
+        return sql
 
     @timer(key="rewrite_query")
     async def _text_to_rewrite(self, request_id,
@@ -207,7 +237,10 @@ class NL2SQLAgent:
                             nl2sql = query_info_list[1]
                             nl2sql = nl2sql.replace(";", "")
                             # 使用LLM修复SQL语法错误
-                            nl2sql = await self._fix_sql_with_llm(nl2sql, rewritten_query, model, temperature, top_p)
+                            nl2sql = await self._fix_sql_with_llm(nl2sql, rewritten_query, model, temperature, top_p, dialect)
+                            # 如果是H2数据库，将MySQL语法转换为H2语法
+                            if dialect.lower() == "h2":
+                                nl2sql = self._convert_mysql_to_h2(nl2sql)
                             tmp_dict["nl2sql"] = nl2sql
                         if len(tmp_dict) > 0:
                             llm_post_result.append(tmp_dict)
@@ -233,7 +266,7 @@ class NL2SQLAgent:
         logger.info(f"[NL2SQL] request_id={request_id} response={json.dumps(response, ensure_ascii=False)}")
         return response
     
-    async def _fix_sql_with_llm(self, sql: str, query: str, model: str, temperature: float, top_p: float) -> str:
+    async def _fix_sql_with_llm(self, sql: str, query: str, model: str, temperature: float, top_p: float, dialect: str = "h2") -> str:
         """
         使用LLM来修复SQL语法错误
         """
@@ -243,7 +276,9 @@ class NL2SQLAgent:
 有语法错误的SQL：
 {sql}
 
-请只输出修复后的SQL，不要添加任何解释。"""
+数据库方言：{dialect}
+
+请确保修复后的SQL符合{dialect}数据库语法规范，只输出修复后的SQL，不要添加任何解释。"""
         
         logger.info(f"[NL2SQL] 尝试使用LLM修复SQL: {sql}")
         
@@ -297,6 +332,26 @@ class NL2SQLAgent:
         table_id_list = body.table_id_list
         column_info = body.column_info
         dialect = body.dialect
+        recall_type = getattr(body, 'recall_type', "")
+        
+        # 如果没有query，尝试从column_info中提取businessPrompt作为查询
+        if not query:
+            business_prompts = []
+            for schema in column_info:
+                if isinstance(schema, dict) and 'businessPrompt' in schema:
+                    business_prompts.append(schema['businessPrompt'])
+            
+            if business_prompts:
+                query = " ".join(business_prompts)
+                logger.info(f"[NL2SQL] request_id={request_id} 从businessPrompt中提取查询: {query}")
+            else:
+                logger.info(f"[NL2SQL] request_id={request_id} 没有查询参数且无法从businessPrompt中提取")
+                # 返回包含空列表的有效响应，避免后端JSON解析失败
+                nl2sql_response = {"code": 200, "data": [], "request_id": request_id, "status": "data", "error_msg": ""}
+                await self.queue.put(json.dumps(nl2sql_response, ensure_ascii=False))
+                await self.queue.put("[DONE]")
+                return nl2sql_response
+            
         try:
             logger.info(f"[NL2SQL] request_id={request_id}, {query=}")
             # 精排任务：rank

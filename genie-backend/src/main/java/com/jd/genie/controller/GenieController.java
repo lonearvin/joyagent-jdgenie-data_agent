@@ -227,6 +227,10 @@ public class GenieController {
             McpTool mcpTool = new McpTool();
             mcpTool.setAgentContext(agentContext);
             for (String mcpServer : genieConfig.getMcpServerUrlArr()) {
+                // Skip empty mcpServer
+                if (mcpServer == null || mcpServer.trim().isEmpty()) {
+                    continue;
+                }
                 String listToolResult = mcpTool.listTool(mcpServer);
                 if (listToolResult.isEmpty()) {
                     log.error("{} mcp server {} invalid", agentContext.getRequestId(), mcpServer);

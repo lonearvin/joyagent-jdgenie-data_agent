@@ -239,9 +239,14 @@ const ChatView: GenieType.FC<Props> = (props) => {
 
   useEffect(() => {
     if (inputInfoProp.message?.length !== 0) {
-      product?.type === "dataAgent" && !inputInfoProp.deepThink
-        ? sendDataMessage(inputInfoProp)
-        : sendMessage(inputInfoProp);
+      // 根据模式类型选择不同的处理方式
+      if (product?.type === "dataAgent" && !inputInfoProp.deepThink) {
+        // 智能问数模式：使用智能问数功能
+        sendDataMessage(inputInfoProp);
+      } else {
+        // 其他模式：使用MultiAgent功能（网页、文档、PPT、表格）
+        sendMessage(inputInfoProp);
+      }
     }
   }, [inputInfoProp, sendMessage]);
 

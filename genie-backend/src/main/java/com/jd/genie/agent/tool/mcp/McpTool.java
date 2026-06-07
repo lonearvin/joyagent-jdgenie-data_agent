@@ -62,7 +62,12 @@ public class McpTool implements BaseTool {
     public String listTool(String mcpServerUrl) {
         try {
             GenieConfig genieConfig = SpringContextHolder.getApplicationContext().getBean(GenieConfig.class);
-            String mcpClientUrl = genieConfig.getMcpClientUrl() + "/v1/tool/list";
+            String mcpClientUrl = genieConfig.getMcpClientUrl();
+            if (mcpClientUrl == null || mcpClientUrl.trim().isEmpty()) {
+                log.info("{} mcpClientUrl is empty, skip mcp tool", agentContext.getRequestId());
+                return "";
+            }
+            mcpClientUrl += "/v1/tool/list";
             McpToolRequest mcpToolRequest = McpToolRequest.builder()
                     .server_url(mcpServerUrl)
                     .build();
@@ -78,7 +83,12 @@ public class McpTool implements BaseTool {
     public String callTool(String mcpServerUrl, String toolName, Object input) {
         try {
             GenieConfig genieConfig = SpringContextHolder.getApplicationContext().getBean(GenieConfig.class);
-            String mcpClientUrl = genieConfig.getMcpClientUrl() + "/v1/tool/call";
+            String mcpClientUrl = genieConfig.getMcpClientUrl();
+            if (mcpClientUrl == null || mcpClientUrl.trim().isEmpty()) {
+                log.info("{} mcpClientUrl is empty, skip mcp tool", agentContext.getRequestId());
+                return "";
+            }
+            mcpClientUrl += "/v1/tool/call";
             Map<String, Object> params = (Map<String, Object>) input;
             McpToolRequest mcpToolRequest = McpToolRequest.builder()
                     .name(toolName)

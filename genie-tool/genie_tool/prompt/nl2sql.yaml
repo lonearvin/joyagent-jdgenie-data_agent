@@ -81,6 +81,18 @@ nl2sql_prompt: |-
   2.性能优先：编写简洁、高效的SQL查询语句。
   3.语法规范：使用标准的 SQL 语法，需要遵循 {{dialect}} 规范。
 
+  # 数据库方言特定语法
+  ## H2数据库语法：
+  - 日期函数：FORMATDATETIME(date_column, 'yyyy-MM-dd') 用于格式化日期
+  - 获取年份：YEAR(date_column) 或 EXTRACT(YEAR FROM date_column)
+  - 日期计算：date_column + INTERVAL 5 YEAR 或 DATEADD(YEAR, -5, CURRENT_DATE)
+  - 日期比较：ORDER_DATE >= '2021-01-01'
+
+  ## MySQL数据库语法：
+  - 日期函数：DATE_FORMAT(date_column, '%Y-%m-%d')
+  - 获取年份：YEAR(date_column)
+  - 日期计算：DATE_SUB(CURDATE(), INTERVAL 5 YEAR)
+
   # 任务流程
   你需要按照如下要求，一步一步完成并输出最终的结果：
   1.用户问题拆解
@@ -132,7 +144,7 @@ nl2sql_prompt: |-
 
   ## case2:
   用户问题：统计2023年每个月的订单总额。
-  输出：统计2023年每个月的订单总额###SELECT month AS `month`, SUM(`total_amount`) AS `total_sales` FROM `orders` where date_time_year = '2023' GROUP BY `month` ORDER BY `month`
+  输出：统计2023年每个月的订单总额###SELECT DATE_FORMAT(`order_date`, '%Y-%m') AS `month`, SUM(`sales`) AS `total_sales` FROM `sales_data` WHERE YEAR(`order_date`) = 2023 GROUP BY DATE_FORMAT(`order_date`, '%Y-%m') ORDER BY `month`
 
   用户问题
   {{query}}

@@ -377,23 +377,19 @@ async def post_nl2sql(body: NL2SQLRequest):
     nl2sql_queue = asyncio.Queue()
     if body.stream:
         async def _stream(queue):
-            if not body.query:
-                yield ServerSentEvent(data="没有提供用户问题，无法进行nl2sql的执行")
-            else:
-                while True:
-                    data = await queue.get()
-                    if data == "[DONE]":
-                        yield ServerSentEvent(data=data)
-                        break
-                    if not isinstance(data, str):
-                        data = json.dumps(data, ensure_ascii=False)
+            while True:
+                data = await queue.get()
+                if data == "[DONE]":
                     yield ServerSentEvent(data=data)
+                    break
+                if not isinstance(data, str):
+                    data = json.dumps(data, ensure_ascii=False)
+                yield ServerSentEvent(data=data)
 
-        def run_task(context, queue, body:NL2SQLRequest):
-            if body.query:
-                context.run(lambda : asyncio.run(NL2SQLAgent(queue=queue).run(body)))
+        def run_task(queue, body:NL2SQLRequest):
+            asyncio.run(NL2SQLAgent(queue=queue).run(body))
 
-        thread = threading.Thread(target=run_task, args=(contextvars.copy_context(), nl2sql_queue, body), daemon=True)
+        thread = threading.Thread(target=run_task, args=(nl2sql_queue, body), daemon=True)
         thread.start()
         return EventSourceResponse(
             _stream(nl2sql_queue),
